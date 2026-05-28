@@ -1,0 +1,8 @@
+target/
+*.rs.bk
+.DS_Store
+*.jpg
+*.jpeg
+*.png
+secret.txt
+test.pdf
