@@ -72,7 +72,7 @@ pub enum Commands {
         #[arg(
             long,
             default_value = "zephyr.proxy.rlwy.net:12963",
-            help = "Signalling server address [default: zephyr.proxy.rlwy.net:12963]"
+            help = "Signalling server address"
         )]
         relay: String,
     },
@@ -104,7 +104,7 @@ pub enum Commands {
         #[arg(
             long,
             default_value = "zephyr.proxy.rlwy.net:12963",
-            help = "Signalling server address [default: zephyr.proxy.rlwy.net:12963]"
+            help = "Signalling server address"
         )]
         relay: String,
     },
