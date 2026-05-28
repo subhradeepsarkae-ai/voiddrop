@@ -26,7 +26,7 @@ pub enum Commands {
         #[arg(long, help = "Generate QR code for mobile download")]
         qr: bool,
 
-        #[arg(long, default_value = "relay.opendev.website:9876", help = "Signalling server address")]
+        #[arg(long, default_value = "zephyr.proxy.rlwy.net:12963", help = "Signalling server address")]
         relay: String,
     },
 
@@ -38,7 +38,7 @@ pub enum Commands {
         #[arg(help = "Blast code (required for --secure-blast mode)")]
         code: Option<String>,
 
-        #[arg(long, default_value = "relay.opendev.website:9876", help = "Signalling server address")]
+        #[arg(long, default_value = "zephyr.proxy.rlwy.net:12963", help = "Signalling server address")]
         relay: String,
     },
 }
