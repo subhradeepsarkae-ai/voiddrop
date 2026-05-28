@@ -24,6 +24,19 @@
 - All helps populated (`--help` descriptions on all flags and args)
 - End-to-end test passed: Fast mode send/receive over localhost
 
+### Session 3 — 2026-05-28 (Final — Ship)
+- **AWS → Railway**: Deployed `voiddrop-server` to Railway (free tier, no wait time)
+- Dockerfile + `railway.json` created for Railway deploy
+- Railway TCP proxy configured: `zephyr.proxy.rlwy.net:12963`
+- **GitHub Release v0.1.0**: `vb.exe` uploaded with install scripts
+- `install.ps1`: Auto-downloads `vb.exe` to `~/.voiddrop/`, adds to PATH
+- `uninstall.ps1`: Clean removal of vb.exe, folder, and PATH entry
+- `vb.exe` rebuilt with `zephyr.proxy.rlwy.net:12963` as default relay (no `--relay` flag needed)
+- **Rich `--help`**: Full process guides for every flag in `vb --help`, clean minimal output in `vb send --help` and `vb receive --help`
+- Repository made public for raw.githubusercontent.com access
+- All modes tested and working: Fast, Secure, Secure-Blast, QR
+- PATH configured: `vb` works from any directory
+
 ---
 
 ## Architecture (Current)
@@ -35,8 +48,9 @@
 | QR mobile bridge | Temp HTTP server on sender's machine |
 | Platform target | Cross-platform (Windows/macOS/Linux) |
 | Server packaging | Separate crate `voiddrop-server` in same workspace |
-| Default server address | `relay.opendev.website:9876` |
-| Default local test | `127.0.0.1:9876` |
+| Hosting | **Railway** (free tier) |
+| Relay address | `zephyr.proxy.rlwy.net:12963` |
+| TCP proxy | Railway TCP proxy on `proxy.rlwy.net` |
 
 ### How it works
 1. Sender connects to signalling server, creates session (keyed by filename for fast, code for secure/blast)
@@ -54,13 +68,18 @@
 voiddrop/
 ├── Cargo.toml                        # workspace root
 ├── checkpoint.md
+├── Dockerfile                        # multistage Rust build for Railway
+├── railway.json                       # Railway deploy config
+├── .gitignore
+├── install.ps1                        # one-click install + PATH setup
+├── uninstall.ps1                      # one-click uninstall + PATH cleanup
 ├── vb/                               # client binary
 │   ├── Cargo.toml
 │   └── src/
 │       ├── main.rs                   # entry, command routing, styled error handler
 │       ├── cli/
 │       │   ├── mod.rs
-│       │   └── args.rs               # clap: send/receive with all flags + help text
+│       │   └── args.rs               # clap: send/receive with rich help docs
 │       ├── commands/
 │       │   ├── mod.rs
 │       │   ├── send.rs               # send handler (all 3 modes + QR + clipboard)
@@ -80,7 +99,7 @@ voiddrop/
 │       └── util/
 │           ├── mod.rs
 │           └── helpers.rs            # code gen, size/duration/speed format, clipboard
-└── voiddrop-server/                  # server binary (deployed to AWS)
+└── voiddrop-server/                  # server binary (deployed to Railway)
     ├── Cargo.toml
     └── src/
         ├── main.rs                   # TCP listener, connection handler
@@ -126,27 +145,36 @@ anyhow = "1"
 
 ## Command Reference
 
+### Send
 ```
 vb send <FILE> [OPTIONS]
-  --fast             Fast mode — instant P2P transfer, no encryption
-  --secure           Secure mode — AES-256-GCM encrypted with 4-digit code
-  --secure-blast     Blast mode — encrypted + filename + alphanumeric code
-  --qr               Generate QR code for mobile download
-  --relay <ADDR>     Signalling server address (default: relay.opendev.website:9876)
 
-vb receive <IDENTIFIER> [CODE]
-  IDENTIFIER         Filename (fast) or session code (secure)
-  CODE               Blast code (required for --secure-blast mode)
-  --relay <ADDR>     Signalling server address (default: relay.opendev.website:9876)
+Options:
+  --fast             Fast mode — no encryption, receiver just needs filename
+  --secure           Secure mode — AES-256-GCM encrypted, 4-digit code
+  --secure-blast     Secure-Blast mode — encrypted + filename + alphanumeric code
+  -q, --qr           Generate QR code for mobile download over WiFi
+  --relay <ADDR>     Signalling server [default: zephyr.proxy.rlwy.net:12963]
+
+Examples:
+  vb send photo.jpg --fast
+  vb send docs.zip --secure
+  vb send secret.zip --secure-blast
+  vb send video.mp4 --fast --qr
 ```
 
-### Mode Detection (Receive)
+### Receive
+```
+vb receive <IDENTIFIER> [CODE] [OPTIONS]
 
-| Arguments | Mode | Example |
-|---|---|---|
-| 1 arg, not 4 digits | Fast | `vb receive photo.jpg` |
-| 1 arg, 4 digits | Secure | `vb receive 4829` |
-| 2 args | Blast | `vb receive plans.zip X9P1` |
+Options:
+  --relay <ADDR>     Signalling server [default: zephyr.proxy.rlwy.net:12963]
+
+Mode Detection:
+  1 arg, not 4 digits      → Fast mode:   vb receive photo.jpg
+  1 arg, exactly 4 digits   → Secure mode:  vb receive 4829
+  2 args                    → Blast mode:   vb receive plans.zip X9P1
+```
 
 ### QR Support
 
@@ -154,7 +182,7 @@ vb receive <IDENTIFIER> [CODE]
 |---|---|---|
 | Fast + `--qr` | ✅ | Scan QR → instant download |
 | Secure + `--qr` | ✅ | Scan QR → webpage → enter code → download |
-| Blast + `--qr` | ❌ | Warning: not available in Phase 1 |
+| Blast + `--qr` | ❌ | Not available |
 
 ---
 
@@ -166,30 +194,50 @@ vb receive <IDENTIFIER> [CODE]
 - [x] **Phase 1.4 — Secure-Blast Mode** — Alphanumeric codes, server-side validation
 - [x] **Phase 1.5 — QR System** — Terminal QR rendering, temp HTTP server, mobile webpage
 - [x] **Phase 1.6 — Beauty & Atmosphere** — Spinners, clipboard, summary boxes, styled errors
-- [ ] **Deploy to AWS** — t2.micro (free tier), Ubuntu 24.04, port 9876, Cloudflare DNS
+- [x] **Deploy to Railway** — TCP proxy on `zephyr.proxy.rlwy.net:12963`
+- [x] **Install Script** — `install.ps1` with auto-PATH, `uninstall.ps1` for cleanup
+- [x] **Rich --help docs** — Full process guides in `vb --help`, clean output in subcommands
 
 ---
 
 ## End-to-End Test Results
 
 - Fast mode: send/receive over localhost ✅
+- Fast mode: send/receive over Railway relay ✅
 - Signalling server: session create/join/P2P ready ✅
 - Progress bar: real-time speed/ETA display ✅
 - Clipboard auto-copy: code copied automatically ✅
 - Summary box: Transfer Complete / Download Complete displayed ✅
 - Styled errors: `✖ Error:` in red (no raw panics) ✅
 - QR: URL generation + terminal rendering ✅
-- Help text: all flags/args documented ✅
+- Help text: full process guide in `vb --help`, clean in subcommands ✅
+- PATH: `vb` works from any directory ✅
+- Railway TCP proxy: `zephyr.proxy.rlwy.net:12963` ✅
+- One-liner install: `iwr -useb .../install.ps1 | iex` ✅
+- One-liner uninstall: `iwr -useb .../uninstall.ps1 | iex` ✅
 
 ---
 
-## AWS Deployment Plan
+## Install / Uninstall (for users)
 
-1. Launch t2.micro (free tier), Ubuntu 24.04
-2. Security group: port 22 (SSH) + port 9876 (signalling)
-3. SSH in, install Rust, `cargo build --release --bin voiddrop-server`
-4. Create systemd service for persistence
-5. Cloudflare DNS: `relay.opendev.website` → A record → EC2 public IP
+### Install (one-liner, Windows):
+```powershell
+iwr -useb https://raw.githubusercontent.com/subhradeepsarkae-ai/voiddrop/master/install.ps1 | iex
+```
+
+### Uninstall (one-liner, Windows):
+```powershell
+iwr -useb https://raw.githubusercontent.com/subhradeepsarkae-ai/voiddrop/master/uninstall.ps1 | iex
+```
+
+---
+
+## GitHub Release
+
+- Release: `v0.1.0 — voiddrop P2P File Transfer`
+- Link: https://github.com/subhradeepsarkae-ai/voiddrop/releases/tag/v0.1.0
+- Binary: `vb.exe` (Windows x64, ~1.9 MB)
+- Platform targets: Windows (Linux/macOS: build from source with `cargo build --release --bin vb`)
 
 ---
 
