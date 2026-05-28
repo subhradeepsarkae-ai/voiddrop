@@ -12,3 +12,5 @@ if ($path -notlike "*$dir*") {
 }
 Write-Host "Done! vb is ready to use anywhere." -ForegroundColor Green
 Write-Host "Just type:  vb send <FILE> --fast" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "NOTE: If 'vb' is not recognized, close and reopen PowerShell, then try again." -ForegroundColor Yellow
