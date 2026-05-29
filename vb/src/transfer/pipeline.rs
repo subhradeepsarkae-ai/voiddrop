@@ -119,14 +119,18 @@ pub async fn http_upload(relay: &str, session_id: &str, filepath: &str) -> Resul
     );
 
     let start = Instant::now();
-    let mut stream = TcpStream::connect(&relay_addr).await?;
+
+    let mut stream = tokio::time::timeout(Duration::from_secs(30), TcpStream::connect(&relay_addr)).await
+        .map_err(|_| anyhow::anyhow!("Timed out connecting to relay (30s)"))??;
     stream.write_all(request.as_bytes()).await?;
     stream.write_all(&file_data).await?;
 
     let mut resp = Vec::new();
     let mut byte = [0u8; 1];
     loop {
-        if stream.read(&mut byte).await? == 0 { break; }
+        let n = tokio::time::timeout(Duration::from_secs(120), stream.read(&mut byte)).await
+            .map_err(|_| anyhow::anyhow!("Timed out waiting for relay response (120s)"))??;
+        if n == 0 { break; }
         resp.push(byte[0]);
         if resp.ends_with(b"\r\n\r\n") { break; }
     }
