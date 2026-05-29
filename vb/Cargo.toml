@@ -20,3 +20,4 @@ serde_json = "1"
 chrono = "0.4"
 arboard = "3"
 base64 = "0.22"
+reqwest = { version = "0.12", features = ["rustls-tls"], default-features = false }

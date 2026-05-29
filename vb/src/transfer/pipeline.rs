@@ -101,43 +101,39 @@ pub async fn send_file(
     Ok(TransferStats { filename, filesize, elapsed })
 }
 
+pub fn http_base_from_relay(relay: &str) -> String {
+    let host = relay.split(':').next().unwrap_or(relay);
+    if host.contains("rlwy.net") {
+        "https://voiddrop-production.up.railway.app".into()
+    } else if host == "127.0.0.1" || host == "localhost" {
+        let port = relay.split(':').nth(1).unwrap_or("9876");
+        format!("http://{}:{}", host, port)
+    } else {
+        format!("http://{}", relay)
+    }
+}
+
 pub async fn http_upload(relay: &str, session_id: &str, filepath: &str) -> Result<TransferStats> {
     let path = std::path::Path::new(filepath);
     let filename = path.file_name().unwrap().to_string_lossy().to_string();
-    let relay_host = relay.split(':').next().unwrap_or(relay);
-    let relay_port = relay.split(':').nth(1).unwrap_or("9876");
-    let relay_addr = format!("{}:{}", relay_host, relay_port);
+    let url = format!("{}/upload/{}", http_base_from_relay(relay), session_id);
 
-    let mut file = tokio::fs::File::open(filepath).await?;
-    let mut file_data = Vec::new();
-    tokio::io::AsyncReadExt::read_to_end(&mut file, &mut file_data).await?;
+    let file_data = tokio::fs::read(filepath).await?;
     let filesize = file_data.len() as u64;
 
-    let request = format!(
-        "POST /upload/{} HTTP/1.1\r\nHost: {}\r\nContent-Length: {}\r\nContent-Type: application/octet-stream\r\nConnection: close\r\n\r\n",
-        session_id, relay_host, file_data.len()
-    );
-
     let start = Instant::now();
+    let rclient = reqwest::Client::builder()
+        .timeout(Duration::from_secs(120))
+        .build()?;
 
-    let mut stream = tokio::time::timeout(Duration::from_secs(30), TcpStream::connect(&relay_addr)).await
-        .map_err(|_| anyhow::anyhow!("Timed out connecting to relay (30s)"))??;
-    stream.write_all(request.as_bytes()).await?;
-    stream.write_all(&file_data).await?;
+    let resp = rclient.post(&url)
+        .body(file_data)
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("Relay upload failed: {}", e))?;
 
-    let mut resp = Vec::new();
-    let mut byte = [0u8; 1];
-    loop {
-        let n = tokio::time::timeout(Duration::from_secs(120), stream.read(&mut byte)).await
-            .map_err(|_| anyhow::anyhow!("Timed out waiting for relay response (120s)"))??;
-        if n == 0 { break; }
-        resp.push(byte[0]);
-        if resp.ends_with(b"\r\n\r\n") { break; }
-    }
-
-    let resp_str = String::from_utf8_lossy(&resp);
-    if !resp_str.contains("200 OK") {
-        anyhow::bail!("Relay upload failed: {}", resp_str.lines().next().unwrap_or("unknown"));
+    if !resp.status().is_success() {
+        anyhow::bail!("Relay upload failed: HTTP {}", resp.status());
     }
 
     let elapsed = start.elapsed();
@@ -246,79 +242,49 @@ async fn relay_download(
     relay: &str,
     code: Option<&str>,
 ) -> Result<TransferStats> {
-    let relay_host = relay.split(':').next().unwrap_or(relay);
-    let relay_port = relay.split(':').nth(1).unwrap_or("80");
-    let relay_addr = format!("{}:{}", relay_host, relay_port);
+    let base_url = http_base_from_relay(relay);
     let code_param = code.map(|c| format!("?code={}", c)).unwrap_or_default();
-    let url_path = format!("/dl/{}{}", session_id, code_param);
-    let request = format!(
-        "GET {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n",
-        url_path, relay_host
-    );
+    let url = format!("{}/dl/{}{}", base_url, session_id, code_param);
+    let outpath = format!("received_{}", filename);
+
+    let rclient = reqwest::Client::builder()
+        .timeout(Duration::from_secs(120))
+        .build()?;
 
     let start = Instant::now();
-    let outpath = format!("received_{}", filename);
 
     loop {
         if start.elapsed() > Duration::from_secs(120) {
             return Err(anyhow::anyhow!("Relay download timed out"));
         }
 
-        let mut stream = match TcpStream::connect(&relay_addr).await {
-            Ok(s) => s,
+        match rclient.get(&url).send().await {
+            Ok(resp) => {
+                if resp.status().is_success() {
+                    let bytes = resp.bytes().await?;
+                    let total = bytes.len() as u64;
+                    tokio::fs::write(&outpath, &bytes).await?;
+
+                    let elapsed = start.elapsed();
+                    client
+                        .send(&super::session::ClientMessage::Data {
+                            session_id: session_id.to_string(),
+                            payload: "done".into(),
+                        })
+                        .await?;
+
+                    return Ok(TransferStats { filename: outpath, filesize: total, elapsed });
+                } else if resp.status().as_u16() == 404 {
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    continue;
+                } else {
+                    anyhow::bail!("Relay download failed: HTTP {}", resp.status());
+                }
+            }
             Err(_) => {
                 tokio::time::sleep(Duration::from_secs(2)).await;
                 continue;
             }
-        };
-
-        stream.write_all(request.as_bytes()).await?;
-
-        let mut header_buf = Vec::new();
-        let mut byte = [0u8; 1];
-        loop {
-            if stream.read(&mut byte).await? == 0 {
-                break;
-            }
-            header_buf.push(byte[0]);
-            if header_buf.ends_with(b"\r\n\r\n") {
-                break;
-            }
-        }
-
-        let header_str = String::from_utf8_lossy(&header_buf);
-
-        if header_str.contains("200 OK") {
-            let mut out = tokio::fs::File::create(&outpath).await?;
-            let mut body_buf = vec![0u8; 64 * 1024];
-            let mut total = 0u64;
-            loop {
-                let n = stream.read(&mut body_buf).await?;
-                if n == 0 {
-                    break;
-                }
-                out.write_all(&body_buf[..n]).await?;
-                total += n as u64;
-            }
-
-            let elapsed = start.elapsed();
-
-            client
-                .send(&super::session::ClientMessage::Data {
-                    session_id: session_id.to_string(),
-                    payload: "done".into(),
-                })
-                .await?;
-
-            return Ok(TransferStats { filename: outpath, filesize: total, elapsed });
-        } else if header_str.contains("404") {
-            tokio::time::sleep(Duration::from_secs(2)).await;
-            continue;
-        } else {
-            return Err(anyhow::anyhow!(
-                "Relay download failed: {}",
-                header_str.lines().next().unwrap_or("unknown")
-            ));
         }
     }
 }
