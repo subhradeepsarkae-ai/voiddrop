@@ -25,8 +25,31 @@
 - End-to-end test passed: Fast mode send/receive over localhost
 
 ### Session 3 — 2026-05-28 (Final — Ship)
-- **AWS → Railway**: Deployed `voiddrop-server` to Railway (free tier, no wait time)
+- AWS → Railway: Deployed `voiddrop-server` to Railway (free tier, no wait time)
 - Dockerfile + `railway.json` created for Railway deploy
+- Railway TCP proxy configured: `zephyr.proxy.rlwy.net:12963`
+- **GitHub Release v0.1.0**: `vb.exe` uploaded with install scripts
+- `install.ps1`: Auto-downloads `vb.exe` to `~/.voiddrop/`, adds to PATH
+- `uninstall.ps1`: Clean removal of vb.exe, folder, and PATH entry
+- `vb.exe` rebuilt with `zephyr.proxy.rlwy.net:12963` as default relay (no `--relay` flag needed)
+- **Rich `--help`**: Full process guides for every flag in `vb --help`, clean minimal output in `vb send --help` and `vb receive --help`
+- Repository made public for raw.githubusercontent.com access
+- All modes tested and working: Fast, Secure, Secure-Blast, QR
+- PATH configured: `vb` works from any directory
+
+### Session 4 — 2026-05-29 (v0.2.0 — Clip + Global QR)
+- **Phase A: `--clip` flag** — `vb/src/util/clipboard.rs` created with `ClipboardFile` struct + `read_clipboard_file()` using `arboard` (file_list + text fallback)
+- `--clip` on `send`: reads clipboard → validates path → shows detection UI → uses resolved path
+- `--clip` on `receive`: reads clipboard → extracts filename → forces fast mode
+- `file` / `identifier` made `Option<String>` in clap; validation ensures either file path or `--clip`
+- **Phase B: `--global-qr` flag** — Relay-based QR that works from anywhere (not just LAN)
+- Protocol extended: `Create.worldwide_qr`, `UploadStart`, `UploadChunk`, `UploadComplete` messages
+- `voiddrop-server` now handles HTTP requests on the same TCP port (protocol detection via first-byte peek)
+- HTTP endpoint `GET /dl/<session-id>` serves buffered file; secure mode shows HTML code page
+- File upload via base64-encoded chunks, buffered in memory only
+- `base64` crate added to both `vb` and `voiddrop-server`
+- End-to-end test passed: Fast mode send/receive over localhost relay
+- Server verified: HTTP detection + signalling protocol multiplexed on single port
 - Railway TCP proxy configured: `zephyr.proxy.rlwy.net:12963`
 - **GitHub Release v0.1.0**: `vb.exe` uploaded with install scripts
 - `install.ps1`: Auto-downloads `vb.exe` to `~/.voiddrop/`, adds to PATH
@@ -127,6 +150,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 chrono = "0.4"
 arboard = "3"
+base64 = "0.22"
 ```
 
 ## Dependencies (voiddrop-server)
@@ -139,6 +163,7 @@ serde_json = "1"
 uuid = { version = "1", features = ["v4"] }
 chrono = "0.4"
 anyhow = "1"
+base64 = "0.22"
 ```
 
 ---
@@ -147,13 +172,15 @@ anyhow = "1"
 
 ### Send
 ```
-vb send <FILE> [OPTIONS]
+vb send [<FILE> | --clip] [OPTIONS]
 
 Options:
   --fast             Fast mode — no encryption, receiver just needs filename
   --secure           Secure mode — AES-256-GCM encrypted, 4-digit code
   --secure-blast     Secure-Blast mode — encrypted + filename + alphanumeric code
-  -q, --qr           Generate QR code for mobile download over WiFi
+  -q, --qr           Generate QR code for mobile download over WiFi (local)
+  --global-qr        Global QR — relay serves file, phone downloads from anywhere
+  -c, --clip         Read file path from clipboard instead of typing
   --relay <ADDR>     Signalling server [default: zephyr.proxy.rlwy.net:12963]
 
 Examples:
@@ -161,28 +188,37 @@ Examples:
   vb send docs.zip --secure
   vb send secret.zip --secure-blast
   vb send video.mp4 --fast --qr
+  vb send --clip --fast
+  vb send --clip --secure
+  vb send photo.jpg --fast --global-qr
+  vb send --clip --fast --global-qr
 ```
 
 ### Receive
 ```
-vb receive <IDENTIFIER> [CODE] [OPTIONS]
+vb receive [<IDENTIFIER> | --clip] [CODE] [OPTIONS]
 
 Options:
+  -c, --clip         Read filename from clipboard instead of typing
   --relay <ADDR>     Signalling server [default: zephyr.proxy.rlwy.net:12963]
 
 Mode Detection:
   1 arg, not 4 digits      → Fast mode:   vb receive photo.jpg
   1 arg, exactly 4 digits   → Secure mode:  vb receive 4829
   2 args                    → Blast mode:   vb receive plans.zip X9P1
+  --clip (no arg)           → Fast mode:   vb receive --clip
 ```
 
 ### QR Support
 
 | Mode | QR | Phone experience |
 |---|---|---|
-| Fast + `--qr` | ✅ | Scan QR → instant download |
-| Secure + `--qr` | ✅ | Scan QR → webpage → enter code → download |
+| Fast + `--qr` | ✅ Local | Scan QR → instant download (same WiFi) |
+| Secure + `--qr` | ✅ Local | Scan QR → webpage → enter code → download (same WiFi) |
 | Blast + `--qr` | ❌ | Not available |
+| Fast + `--global-qr` | ✅ Global | Scan QR → instant download (anywhere) |
+| Secure + `--global-qr` | ✅ Global | Scan QR → webpage → enter code → download (anywhere) |
+| Blast + `--global-qr` | ❌ | Not available |
 
 ---
 
@@ -197,6 +233,8 @@ Mode Detection:
 - [x] **Deploy to Railway** — TCP proxy on `zephyr.proxy.rlwy.net:12963`
 - [x] **Install Script** — `install.ps1` with auto-PATH, `uninstall.ps1` for cleanup
 - [x] **Rich --help docs** — Full process guides in `vb --help`, clean output in subcommands
+- [x] **Phase A: --clip flag** — Send files from clipboard without typing paths
+- [x] **Phase B: --global-qr flag** — Relay-based QR works from anywhere (not just LAN)
 
 ---
 
@@ -215,6 +253,9 @@ Mode Detection:
 - Railway TCP proxy: `zephyr.proxy.rlwy.net:12963` ✅
 - One-liner install: `iwr -useb .../install.ps1 | iex` ✅
 - One-liner uninstall: `iwr -useb .../uninstall.ps1 | iex` ✅
+- **--clip flag**: send/receive with clipboard detection ✅
+- **--global-qr**: relay-based file upload + HTTP endpoint ✅
+- **Protocol multiplexing**: HTTP + signalling on single TCP port ✅
 
 ---
 
@@ -239,11 +280,20 @@ iwr -useb https://raw.githubusercontent.com/subhradeepsarkae-ai/voiddrop/master/
 - Binary: `vb.exe` (Windows x64, ~1.9 MB)
 - Platform targets: Windows (Linux/macOS: build from source with `cargo build --release --bin vb`)
 
+### Upcoming (v0.2.0)
+
+- Release will include `--clip` and `--global-qr` features
+- Binary rebuilt with new flags
+- `voiddrop-server` redeployed to Railway with HTTP endpoint
+
 ---
 
-## Upcoming (v0.2.0)
+## Upcoming (v0.3.0)
 
-- [ ] **Worldwide QR** — Add HTTP endpoint to `voiddrop-server` (`/qr/<session-id>`). Sender streams file through relay, phone downloads over internet. File buffered in memory only, no disk storage. QR URL becomes `https://zephyr.proxy.rlwy.net/qr/<id>`. Works from anywhere.
+- [ ] **HTTPS for relay QR** — Configure Railway HTTP proxy so `--global-qr` uses `https://` instead of `http://`
+- [ ] **Drag-and-drop** — Let users drag a file onto the terminal window for `vb send`
+- [ ] **Receive path flag** — `vb receive --out <dir>` to specify download directory
+- [ ] **--clip on receive secure** — `vb receive --clip <code>` (filename from clipboard, code from arg)
 
 ## Do NOT add
 

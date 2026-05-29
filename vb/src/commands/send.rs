@@ -5,22 +5,39 @@ use crate::transfer::session::SignallingClient;
 use crate::ui::banner;
 use crate::ui::progress::new_spinner;
 use crate::ui::qr::print_qr;
+use crate::util::clipboard;
 use crate::util::helpers::{copy_to_clipboard, format_size, format_speed, generate_blast_code, generate_code};
 use anyhow::Result;
+use base64::Engine;
 use colored::Colorize;
 use std::path::Path;
+use std::time::Instant;
+use tokio::io::AsyncReadExt;
 
 pub async fn handle_send(
-    file: &str,
+    file: Option<String>,
+    clip: bool,
     _fast: bool,
     secure: bool,
     secure_blast: bool,
     qr: bool,
+    global_qr: bool,
     relay: &str,
 ) -> Result<()> {
-    let path = Path::new(file);
-    let filesize = tokio::fs::metadata(file).await?.len();
-    let filename = path.file_name().unwrap().to_string_lossy().to_string();
+    let (resolved_file, filesize, filename) = {
+        if clip {
+            let clip_file = clipboard::read_clipboard_file()?;
+            clipboard::print_clipboard_detected(&clip_file);
+            (clip_file.path.to_string_lossy().to_string(), clip_file.size, clip_file.filename)
+        } else if let Some(f) = file {
+            let path = Path::new(&f);
+            let sz = tokio::fs::metadata(&f).await?.len();
+            let name = path.file_name().unwrap().to_string_lossy().to_string();
+            (f, sz, name)
+        } else {
+            anyhow::bail!("Either provide a file path or use --clip")
+        }
+    };
 
     let mode = if secure_blast {
         "blast"
@@ -34,6 +51,9 @@ pub async fn handle_send(
 
     if secure_blast && qr {
         println!("  {} QR not available for blast mode (Phase 1)\n", "⚠".yellow());
+    }
+    if secure_blast && global_qr {
+        println!("  {} Global QR not available for blast mode\n", "⚠".yellow());
     }
 
     println!(
@@ -77,6 +97,7 @@ pub async fn handle_send(
             filename: filename.clone(),
             filesize,
             code: session_key.clone(),
+            worldwide_qr: if global_qr { Some(true) } else { None },
         })
         .await?;
 
@@ -90,13 +111,94 @@ pub async fn handle_send(
             unreachable!()
         };
 
-    if qr && mode != "blast" {
+    if global_qr && mode != "blast" {
+        let upload_spinner = new_spinner("  🌍 Uploading file to relay...");
+
+        client
+            .send(&crate::transfer::session::ClientMessage::UploadStart {
+                session_id: session_id.clone(),
+                filesize,
+            })
+            .await?;
+
+        let mut file = tokio::fs::File::open(&resolved_file).await?;
+        let mut buf = vec![0u8; 64 * 1024];
+        let mut written: u64 = 0;
+        let upload_start = Instant::now();
+
+        loop {
+            let n = file.read(&mut buf).await?;
+            if n == 0 {
+                break;
+            }
+            let encoded = base64::engine::general_purpose::STANDARD.encode(&buf[..n]);
+            written += n as u64;
+            let is_last = written >= filesize;
+            client
+                .send(&crate::transfer::session::ClientMessage::UploadChunk {
+                    session_id: session_id.clone(),
+                    data: encoded,
+                    is_last,
+                })
+                .await?;
+            if is_last {
+                break;
+            }
+        }
+
+        client
+            .recv_until(|m| matches!(m, crate::transfer::session::ServerMessage::UploadComplete { .. }))
+            .await?;
+
+        let upload_elapsed = upload_start.elapsed();
+
+        upload_spinner.finish_with_message(format!(
+            "  ✅ Uploaded to relay ({})",
+            format_size(filesize)
+        ));
+
+        let relay_host = relay.split(':').next().unwrap_or(relay);
+        let qr_url = format!("http://{}/dl/{}", relay_host, session_id);
+        println!();
+        print_qr(&qr_url);
+
+        if mode == "secure" {
+            println!("  {} Receiver scans QR, enters code on phone", "📱".to_string());
+        } else {
+            println!("  {} Scan QR to download from anywhere", "📱".to_string());
+        }
+
+        client
+            .send(&crate::transfer::session::ClientMessage::Data {
+                session_id: session_id.clone(),
+                payload: "done".into(),
+            })
+            .await?;
+
+        let speed = format_speed(filesize, upload_elapsed.as_secs_f64());
+
+        println!();
+        println!("  {}", "┌────────────────────────────────┐".cyan());
+        println!("  {} {:^30} {}", "│".cyan(), "Transfer Complete".green().bold(), "│".cyan());
+        println!("  {}", "├────────────────────────────────┤".cyan());
+        println!("  │  Mode:        {:<18} │", match mode { "secure" => "Secure QR".cyan(), _ => "Global QR".green() });
+        println!("  │  File:        {:<18} │", filename);
+        println!("  │  Size:        {:<18} │", format_size(filesize));
+        println!("  │  Time:        {:<18} │", format!("{:.1}s", upload_elapsed.as_secs_f64()));
+        println!("  │  Speed:       {:<18} │", speed);
+        println!("  {}", "└────────────────────────────────┘".cyan());
+        println!();
+
+        return Ok(());
+    }
+
+    if !global_qr && qr && mode != "blast" {
         let auth_code = if mode == "secure" {
             Some(display_code.clone())
         } else {
             None
         };
-        let server = start_server(file.to_string(), session_id.clone(), auth_code).await?;
+        let server = start_server(resolved_file.clone(), session_id.clone(), auth_code).await?;
         println!("  📱 QR server on port {}\n", server.port);
         print_qr(&server.url);
     }
@@ -107,7 +209,7 @@ pub async fn handle_send(
         _ => None,
     };
 
-    let stats = pipeline::send_file(&mut client, &session_id, file, encryption_key).await?;
+    let stats = pipeline::send_file(&mut client, &session_id, &resolved_file, encryption_key).await?;
 
     let speed = format_speed(stats.filesize, stats.elapsed.as_secs_f64());
 

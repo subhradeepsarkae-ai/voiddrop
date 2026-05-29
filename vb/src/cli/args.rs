@@ -9,8 +9,8 @@ use clap::{Parser, Subcommand};
         "voiddrop — peer-to-peer file transfer over the terminal.\n",
         "Files stream directly between machines. The relay only coordinates.\n\n",
         "USAGE:\n",
-        "  vb send <FILE> [--fast | --secure | --secure-blast] [--qr] [--relay ADDR]\n",
-        "  vb receive <IDENTIFIER> [CODE] [--relay ADDR]\n\n",
+         "  vb send [<FILE> | --clip] [--fast | --secure | --secure-blast] [--qr | --global-qr] [--relay ADDR]\n",
+         "  vb receive [<IDENTIFIER> | --clip] [CODE] [--relay ADDR]\n\n",
         "━━━ MODE: --fast ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n",
         "No encryption, instant transfer. Receiver just needs the filename.\n\n",
         "SENDER:\n",
@@ -69,8 +69,33 @@ use clap::{Parser, Subcommand};
         "Use a custom signalling server instead of the default.\n\n",
         "  --relay 127.0.0.1:9876        Local testing (self-hosted relay)\n",
         "  --relay myrelay.com:9876      Your own server\n\n",
-        "DEFAULT: zephyr.proxy.rlwy.net:12963\n\n",
-        "━━━ RECEIVE MODE DETECTION ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n",
+         "DEFAULT: zephyr.proxy.rlwy.net:12963\n\n",
+         "━━━ FLAG: --clip ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n",
+         "Send files directly from clipboard — no typing needed.\n\n",
+         "SENDER:\n",
+         "  vb send --clip --fast\n",
+         "  → Reads file path from clipboard (copied file or path text)\n",
+         "  → Shows detected file name and size\n",
+         "  → Starts transfer in chosen mode\n",
+         "  → Works with --fast, --secure, and --qr\n\n",
+         "RECEIVER:\n",
+         "  vb receive --clip\n",
+         "  → Reads filename from clipboard\n",
+         "  → Joins fast-mode session by filename\n\n",
+         "HOW TO COPY A FILE:\n",
+         "  Windows: Ctrl+C the file in File Explorer\n",
+         "  macOS:   Cmd+C the file in Finder\n",
+         "  Linux:   Ctrl+C the file in file manager\n",
+         "  Or copy a file path as text from anywhere\n\n",
+         "━━━ FLAG: --global-qr ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n",
+         "QR that works from anywhere — phone doesn't need to be on same WiFi.\n\n",
+         "  File is uploaded through the relay server (in memory only, no disk).\n",
+         "  Phone scans QR and downloads directly from the relay.\n\n",
+         "  vb send photo.jpg --fast --global-qr\n",
+         "  vb send --clip --secure --global-qr\n\n",
+         "  Supports --fast and --secure (not --secure-blast).\n",
+         "  When --global-qr is set, --qr is ignored.\n\n",
+         "━━━ RECEIVE MODE DETECTION ─────────────────────────────────────\n",
         "vb auto-detects the mode based on what you type:\n\n",
         "  1 arg, has file extension or >4 chars\n",
         "    → FAST MODE:  vb receive song.mp3\n\n",
@@ -109,13 +134,17 @@ pub enum Commands {
             "  vb send photo.jpg --fast                  no encryption, just filename\n",
             "  vb send docs.zip --secure                 AES-256 encrypted, 4-digit code\n",
             "  vb send secret.zip --secure-blast          encrypted, filename + alphanumeric code\n",
-            "  vb send video.mp4 --fast --qr              QR for phone download over WiFi\n\n",
+            "  vb send video.mp4 --fast --qr              QR for phone download over WiFi\n",
+            "  vb send --clip --fast                     send file from clipboard (fast)\n",
+            "  vb send --clip --secure                   send file from clipboard (encrypted)\n",
+            "  vb send photo.jpg --fast --global-qr      QR via relay (anywhere)\n",
+            "  vb send --clip --fast --global-qr          clipboard + global QR\n\n",
             "For full details on every mode and flag, run:  vb --help"
         )
     )]
     Send {
-        #[arg(help = "Path to the file you want to send")]
-        file: String,
+        #[arg(help = "Path to the file you want to send (omit when using --clip)")]
+        file: Option<String>,
 
         #[arg(long, help = "Fast mode — No encryption. Receiver just needs the filename.")]
         fast: bool,
@@ -131,6 +160,19 @@ pub enum Commands {
 
         #[arg(
             long,
+            short = 'c',
+            help = "Read file path from clipboard instead of typing it"
+        )]
+        clip: bool,
+
+        #[arg(
+            long,
+            help = "Global QR — Relay serves the file. Phone downloads from anywhere (not just LAN)"
+        )]
+        global_qr: bool,
+
+        #[arg(
+            long,
             default_value = "zephyr.proxy.rlwy.net:12963",
             help = "Signalling server address"
         )]
@@ -143,16 +185,24 @@ pub enum Commands {
             "MODE DETECTION (auto-detected):\n",
             "  1 arg, has extension or >4 chars  → FAST mode:  vb receive photo.jpg\n",
             "  1 arg, exactly 4 digits            → SECURE mode:  vb receive 4829\n",
-            "  2 args                             → BLAST mode:  vb receive plans.zip X9P1\n\n",
+            "  2 args                             → BLAST mode:  vb receive plans.zip X9P1\n",
+            "  --clip (no arg)                    → FAST mode:  vb receive --clip\n\n",
             "For full details on modes and flags, run:  vb --help"
         )
     )]
     Receive {
-        #[arg(help = "Filename (fast mode) or session code (secure mode) — sender tells you which")]
-        identifier: String,
+        #[arg(help = "Filename (fast mode) or session code (secure mode) — omit when using --clip")]
+        identifier: Option<String>,
 
         #[arg(help = "Blast code (required for --secure-blast mode). Sender provides this alongside the filename")]
         code: Option<String>,
+
+        #[arg(
+            long,
+            short = 'c',
+            help = "Read filename from clipboard instead of typing it"
+        )]
+        clip: bool,
 
         #[arg(
             long,

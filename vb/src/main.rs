@@ -23,12 +23,19 @@ async fn main() {
             secure,
             secure_blast,
             qr,
+            clip,
+            global_qr,
             relay,
         } => {
-            send::handle_send(&file, fast, secure, secure_blast, qr, &relay).await
+            send::handle_send(file, clip, fast, secure, secure_blast, qr, global_qr, &relay).await
         }
-        Commands::Receive { identifier, code, relay } => {
-            receive::handle_receive(&identifier, code.as_deref(), &relay).await
+        Commands::Receive {
+            identifier,
+            code,
+            clip,
+            relay,
+        } => {
+            receive::handle_receive(identifier, code, clip, &relay).await
         }
     };
 
