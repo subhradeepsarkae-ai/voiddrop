@@ -7,6 +7,25 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 
+fn percent_decode(s: &str) -> String {
+    let mut out = String::new();
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c == '%' {
+            let hex: String = chars.by_ref().take(2).collect();
+            if let Ok(byte) = u8::from_str_radix(&hex, 16) {
+                out.push(byte as char);
+            } else {
+                out.push('%');
+                out.push_str(&hex);
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
 const SESSION_TTL_SECS: i64 = 600;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -137,9 +156,9 @@ async fn handle_http(
     let path = parts.get(1).unwrap_or(&"/");
 
     if *method == "POST" {
-        let session_id = path.strip_prefix("/upload/").unwrap_or("");
+        let session_id = percent_decode(path.strip_prefix("/upload/").unwrap_or(""));
         let mut sm = sessions.lock().await;
-        if !sm.upload_start(session_id) {
+        if !sm.upload_start(&session_id) {
             drop(sm);
             let resp = make_http_header(404, "text/plain", 26);
             writer.write_all(resp.as_bytes()).await?;
@@ -158,7 +177,7 @@ async fn handle_http(
         body.truncate(read_total);
 
         let mut sm = sessions.lock().await;
-        sm.store_file(session_id, &body);
+        sm.store_file(&session_id, &body);
 
         let resp = make_http_header(200, "text/plain", 2);
         writer.write_all(resp.as_bytes()).await?;
@@ -166,17 +185,17 @@ async fn handle_http(
         return Ok(());
     }
 
-    let session_id = path.strip_prefix("/dl/").and_then(|s| s.split('?').next()).unwrap_or("");
+    let session_id = percent_decode(path.strip_prefix("/dl/").and_then(|s| s.split('?').next()).unwrap_or(""));
     let query_code = path.split("?code=").nth(1).unwrap_or("");
 
     let mut sm = sessions.lock().await;
-    let session = sm.join(session_id).filter(|s| s.upload_ready);
+    let session = sm.join(&session_id).filter(|s| s.upload_ready);
 
     match session {
         Some(sess) => {
             if sess.mode == "secure" && query_code.is_empty() {
                 drop(sm);
-                let html = html_code_page(session_id, &sess.code);
+                let html = html_code_page(&session_id, &sess.code);
                 let resp = make_http_header(200, "text/html; charset=utf-8", html.len());
                 writer.write_all(resp.as_bytes()).await?;
                 writer.write_all(html.as_bytes()).await?;
@@ -189,7 +208,7 @@ async fn handle_http(
                 writer.write_all(b"Invalid code").await?;
                 return Ok(());
             }
-            let file_data = sm.get_file(session_id);
+            let file_data = sm.get_file(&session_id);
             drop(sm);
 
             if let Some(data) = file_data {

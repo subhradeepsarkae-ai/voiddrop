@@ -101,6 +101,18 @@ pub async fn send_file(
     Ok(TransferStats { filename, filesize, elapsed })
 }
 
+pub fn percent_encode(s: &str) -> String {
+    let mut out = String::new();
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            b' ' => out.push_str("%20"),
+            _ => out.push_str(&format!("%{:02X}", b)),
+        }
+    }
+    out
+}
+
 pub async fn http_upload(relay: &str, session_id: &str, filepath: &str) -> Result<TransferStats> {
     let path = std::path::Path::new(filepath);
     let filename = path.file_name().unwrap().to_string_lossy().to_string();
@@ -113,9 +125,10 @@ pub async fn http_upload(relay: &str, session_id: &str, filepath: &str) -> Resul
     tokio::io::AsyncReadExt::read_to_end(&mut file, &mut file_data).await?;
     let filesize = file_data.len() as u64;
 
+    let encoded_id = percent_encode(session_id);
     let request = format!(
         "POST /upload/{} HTTP/1.1\r\nHost: {}\r\nContent-Length: {}\r\nContent-Type: application/octet-stream\r\nConnection: close\r\n\r\n",
-        session_id, relay_host, file_data.len()
+        encoded_id, relay_host, file_data.len()
     );
 
     let start = Instant::now();
@@ -250,7 +263,8 @@ async fn relay_download(
     let relay_port = relay.split(':').nth(1).unwrap_or("80");
     let relay_addr = format!("{}:{}", relay_host, relay_port);
     let code_param = code.map(|c| format!("?code={}", c)).unwrap_or_default();
-    let url_path = format!("/dl/{}{}", session_id, code_param);
+    let encoded_id = percent_encode(session_id);
+    let url_path = format!("/dl/{}{}", encoded_id, code_param);
     let request = format!(
         "GET {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n",
         url_path, relay_host

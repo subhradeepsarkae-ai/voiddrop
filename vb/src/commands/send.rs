@@ -1,5 +1,5 @@
 use crate::transfer::crypto::derive_key;
-use crate::transfer::pipeline;
+use crate::transfer::pipeline::{self, percent_encode};
 use crate::transfer::server::start_server;
 use crate::transfer::session::SignallingClient;
 use crate::ui::banner;
@@ -118,7 +118,7 @@ pub async fn handle_send(
             format_size(stats.filesize)
         ));
 
-        let qr_url = format!("http://{}/dl/{}", relay, session_id);
+        let qr_url = format!("http://{}/dl/{}", relay, percent_encode(&session_id));
         println!();
         print_qr(&qr_url);
 
