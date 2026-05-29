@@ -51,7 +51,6 @@
 - End-to-end test passed: Fast mode send/receive over localhost relay
 - Server verified: HTTP detection + signalling protocol multiplexed on single port
 - Railway TCP proxy configured: `zephyr.proxy.rlwy.net:12963`
-- **GitHub Release v0.1.0**: `vb.exe` uploaded with install scripts
 - `install.ps1`: Auto-downloads `vb.exe` to `~/.voiddrop/`, adds to PATH
 - `uninstall.ps1`: Clean removal of vb.exe, folder, and PATH entry
 - `vb.exe` rebuilt with `zephyr.proxy.rlwy.net:12963` as default relay (no `--relay` flag needed)
@@ -59,6 +58,16 @@
 - Repository made public for raw.githubusercontent.com access
 - All modes tested and working: Fast, Secure, Secure-Blast, QR
 - PATH configured: `vb` works from any directory
+
+### Session 5 — 2026-05-29 (v0.1.1 — Relay download fix)
+- **Critical bug: relay download timed out** — diagnosed from user screenshots
+- **Root cause 1**: Server sent `UploadComplete` immediately on `UploadStart`, before any chunks were uploaded
+- **Root cause 2**: Sender sent `"done"` after relay upload, deleting the session before the receiver could HTTP download
+- **Fix 1** (`voiddrop-server/src/session.rs`): Removed premature `UploadComplete` from `UploadStart` handler — server now only sends it on the last chunk
+- **Fix 2** (`vb/src/commands/send.rs`): Removed `send("done")` after global-QR upload — session stays alive
+- **Fix 3** (`vb/src/transfer/pipeline.rs`): Removed `send("done")` from `relay_upload` — same reason
+- Server redeployed to Railway via API (CLI auth issues worked around via GraphQL API)
+- **GitHub Release v0.1.1**: `vb.exe` with relay fixes, auto-downloaded by existing `install.ps1`
 
 ---
 
@@ -235,6 +244,7 @@ Mode Detection:
 - [x] **Rich --help docs** — Full process guides in `vb --help`, clean output in subcommands
 - [x] **Phase A: --clip flag** — Send files from clipboard without typing paths
 - [x] **Phase B: --global-qr flag** — Relay-based QR works from anywhere (not just LAN)
+- [x] **Relay download fix v0.1.1** — Fixes "Relay download timed out" when P2P is blocked by NAT
 
 ---
 
@@ -256,6 +266,7 @@ Mode Detection:
 - **--clip flag**: send/receive with clipboard detection ✅
 - **--global-qr**: relay-based file upload + HTTP endpoint ✅
 - **Protocol multiplexing**: HTTP + signalling on single TCP port ✅
+- **Relay download fix**: relay fallback no longer times out ✅
 
 ---
 
@@ -280,10 +291,10 @@ iwr -useb https://raw.githubusercontent.com/subhradeepsarkae-ai/voiddrop/master/
 - Binary: `vb.exe` (Windows x64, ~1.9 MB)
 - Platform targets: Windows (Linux/macOS: build from source with `cargo build --release --bin vb`)
 
-### Upcoming (v0.2.0)
-
-- Release will include `--clip` and `--global-qr` features
-- Binary rebuilt with new flags
+- Release: `v0.1.1 — Relay download fix`
+- Link: https://github.com/subhradeepsarkae-ai/voiddrop/releases/tag/v0.1.1
+- Binary: `vb.exe` (Windows x64, ~2.0 MB)
+- Fixes relay download timeout when P2P is blocked by NAT
 - `voiddrop-server` redeployed to Railway with HTTP endpoint
 
 ---
