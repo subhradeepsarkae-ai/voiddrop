@@ -25,3 +25,15 @@ pub fn get_local_ip() -> Option<String> {
     let local = socket.local_addr().ok()?;
     Some(local.ip().to_string())
 }
+
+pub async fn get_public_ip() -> Option<String> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut stream = tokio::net::TcpStream::connect("api.ipify.org:80").await.ok()?;
+    let req = "GET / HTTP/1.1\r\nHost: api.ipify.org\r\nConnection: close\r\n\r\n";
+    stream.write_all(req.as_bytes()).await.ok()?;
+    let mut buf = vec![0u8; 512];
+    let n = stream.read(&mut buf).await.ok()?;
+    let resp = String::from_utf8_lossy(&buf[..n]);
+    let ip = resp.split("\r\n\r\n").nth(1)?.trim();
+    if !ip.is_empty() { Some(ip.to_string()) } else { None }
+}

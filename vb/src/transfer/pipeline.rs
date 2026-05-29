@@ -1,5 +1,6 @@
 use crate::transfer::session::SignallingClient;
 use crate::ui::progress::new_progress_bar;
+use crate::ui::qr::get_public_ip;
 use crate::util::helpers::format_size;
 use anyhow::Result;
 use std::path::Path;
@@ -31,7 +32,8 @@ pub async fn send_file(
 
     let listener = TcpListener::bind("0.0.0.0:0").await?;
     let p2p_port = listener.local_addr()?.port();
-    let external_addr = format!("127.0.0.1:{}", p2p_port);
+    let public_ip = get_public_ip().await.unwrap_or_else(|| "127.0.0.1".into());
+    let external_addr = format!("{}:{}", public_ip, p2p_port);
 
     client
         .send(&super::session::ClientMessage::P2pReady {
