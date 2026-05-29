@@ -1,5 +1,4 @@
 use anyhow::Result;
-use base64::Engine;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -21,10 +20,6 @@ pub enum ClientMessage {
     P2pReady { session_id: String, addr: String },
     #[serde(rename = "data")]
     Data { session_id: String, payload: String },
-    #[serde(rename = "upload_start")]
-    UploadStart { session_id: String, filesize: u64 },
-    #[serde(rename = "upload_chunk")]
-    UploadChunk { session_id: String, data: String, #[serde(rename = "final")] is_last: bool },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,8 +33,6 @@ pub enum ServerMessage {
     P2pReadyAck { },
     #[serde(rename = "session_closed")]
     SessionClosed { reason: String },
-    #[serde(rename = "upload_complete")]
-    UploadComplete { session_id: String },
     #[serde(rename = "error")]
     Error { message: String },
 }
@@ -165,8 +158,7 @@ async fn handle_http(
         body.truncate(read_total);
 
         let mut sm = sessions.lock().await;
-        let encoded = base64::engine::general_purpose::STANDARD.encode(&body);
-        let _ = sm.upload_chunk(session_id, &encoded, true);
+        sm.store_file(session_id, &body);
 
         let resp = make_http_header(200, "text/plain", 2);
         writer.write_all(resp.as_bytes()).await?;
@@ -352,29 +344,6 @@ async fn handle_msg(
                 send(writer, &ServerMessage::SessionClosed { reason: "transfer complete".into() }).await?;
             }
         }
-
-        ClientMessage::UploadStart { session_id, filesize: _ } => {
-            let mut sm = sessions.lock().await;
-            if !sm.upload_start(&session_id) {
-                send(writer, &ServerMessage::Error {
-                    message: "session not found for upload".into(),
-                }).await?;
-            }
-        }
-
-        ClientMessage::UploadChunk { session_id, data, is_last } => {
-            let mut sm = sessions.lock().await;
-            match sm.upload_chunk(&session_id, &data, is_last) {
-                Ok(()) => {
-                    if is_last {
-                        send(writer, &ServerMessage::UploadComplete { session_id }).await?;
-                    }
-                }
-                Err(e) => {
-                    send(writer, &ServerMessage::Error { message: e.to_string() }).await?;
-                }
-            }
-        }
     }
 
     Ok(())
@@ -404,20 +373,10 @@ impl SessionManager {
         }
     }
 
-    pub fn upload_chunk(&mut self, session_id: &str, data: &str, is_last: bool) -> Result<()> {
-        if let Some(buf) = self.file_buffers.get_mut(session_id) {
-            let decoded = base64::engine::general_purpose::STANDARD
-                .decode(data)
-                .map_err(|e| anyhow::anyhow!("base64 decode error: {}", e))?;
-            buf.extend_from_slice(&decoded);
-            if is_last {
-                if let Some(s) = self.sessions.get_mut(session_id) {
-                    s.upload_ready = true;
-                }
-            }
-            Ok(())
-        } else {
-            Err(anyhow::anyhow!("no upload buffer for session {}", session_id))
+    pub fn store_file(&mut self, session_id: &str, data: &[u8]) {
+        self.file_buffers.insert(session_id.to_string(), data.to_vec());
+        if let Some(s) = self.sessions.get_mut(session_id) {
+            s.upload_ready = true;
         }
     }
 

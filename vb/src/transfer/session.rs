@@ -15,10 +15,6 @@ pub enum ClientMessage {
     P2pReady { session_id: String, addr: String },
     #[serde(rename = "data")]
     Data { session_id: String, payload: String },
-    #[serde(rename = "upload_start")]
-    UploadStart { session_id: String, filesize: u64 },
-    #[serde(rename = "upload_chunk")]
-    UploadChunk { session_id: String, data: String, #[serde(rename = "final")] is_last: bool },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -32,8 +28,6 @@ pub enum ServerMessage {
     P2pReadyAck { },
     #[serde(rename = "session_closed")]
     SessionClosed { reason: String },
-    #[serde(rename = "upload_complete")]
-    UploadComplete { session_id: String },
     #[serde(rename = "error")]
     Error { message: String },
 }
