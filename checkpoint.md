@@ -297,6 +297,26 @@ iwr -useb https://raw.githubusercontent.com/subhradeepsarkae-ai/voiddrop/master/
 - Fixes relay download timeout when P2P is blocked by NAT
 - `voiddrop-server` redeployed to Railway with HTTP endpoint
 
+- Release: `v0.1.2 — HTTP POST upload (reliable relay)`
+- Link: https://github.com/subhradeepsarkae-ai/voiddrop/releases/tag/v0.1.2
+- Binary: `vb.exe` (Windows x64, ~2.0 MB)
+- Fixes: base64 chunk upload over signalling → HTTP POST /upload
+- Also: QR URL port fix, timeouts on all relay operations, removed dead protocol messages
+
+---
+
+### Session 6 — 2026-05-29 (v0.1.2 — HTTP POST upload)
+- **Root cause diagnosed**: Railway TCP proxy throttled sustained base64 JSON data over signalling connection — chunk 2+ took 5+ seconds, then connection dropped
+- **Fix**: HTTP POST upload (`POST /upload/<id>`) instead of base64-encoded JSON chunks
+- **Server** (`voiddrop-server/src/session.rs`): New POST handler reads raw binary body, `store_file()` method replaces `upload_chunk()`
+- **Client** (`vb/src/commands/send.rs`): Global QR upload uses `http_upload()` instead of chunked signalling messages
+- **Client** (`vb/src/transfer/pipeline.rs`): New `http_upload()` function with 30s connect + 120s response timeouts
+- **Client** (`vb/src/transfer/session.rs`): `recv_until()` now has 60s timeout and surfaces `Error` messages
+- **QR URL fix**: Missing port `:12963` in QR URL caused browser to hit Railway error page
+- **Cleanup**: Removed dead `UploadStart`/`UploadChunk`/`UploadComplete` protocol messages from both client and server
+- **GitHub Release v0.1.2**: `vb.exe` with HTTP POST upload + timeouts
+- All modes tested and working: Fast, Secure, Secure-Blast, QR, Global QR
+
 ---
 
 ## Upcoming (v0.3.0)
