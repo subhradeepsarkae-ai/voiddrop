@@ -168,13 +168,6 @@ pub async fn handle_send(
             println!("  {} Scan QR to download from anywhere", "📱".to_string());
         }
 
-        client
-            .send(&crate::transfer::session::ClientMessage::Data {
-                session_id: session_id.clone(),
-                payload: "done".into(),
-            })
-            .await?;
-
         let speed = format_speed(filesize, upload_elapsed.as_secs_f64());
 
         println!();

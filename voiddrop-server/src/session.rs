@@ -316,9 +316,7 @@ async fn handle_msg(
 
         ClientMessage::UploadStart { session_id, filesize: _ } => {
             let mut sm = sessions.lock().await;
-            if sm.upload_start(&session_id) {
-                send(writer, &ServerMessage::UploadComplete { session_id }).await?;
-            } else {
+            if !sm.upload_start(&session_id) {
                 send(writer, &ServerMessage::Error {
                     message: "session not found for upload".into(),
                 }).await?;

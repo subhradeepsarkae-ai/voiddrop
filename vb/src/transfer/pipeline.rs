@@ -147,15 +147,6 @@ async fn relay_upload(
         .recv_until(|m| matches!(m, ServerMessage::UploadComplete { .. }))
         .await?;
 
-    println!("  🌍 File uploaded to relay — receiver is downloading...");
-
-    client
-        .send(&super::session::ClientMessage::Data {
-            session_id: session_id.to_string(),
-            payload: "done".into(),
-        })
-        .await?;
-
     let elapsed = start.elapsed();
     Ok(TransferStats { filename, filesize, elapsed })
 }
