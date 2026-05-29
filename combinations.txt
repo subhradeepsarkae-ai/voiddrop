@@ -1,0 +1,75 @@
+=== VOIDDROP — VALID COMMAND COMBINATIONS ===
+
+--- SEND (file path) ---
+
+vb send file.jpg --fast
+  Fast mode, no encryption, receiver just needs filename.
+
+vb send file.jpg --secure
+  Secure mode, AES-256-GCM encrypted, 4-digit code.
+
+vb send file.jpg --secure-blast
+  Blast mode, encrypted + filename + alphanumeric code.
+
+vb send file.jpg --qr
+  Defaults to Fast mode + local QR (same WiFi).
+
+vb send file.jpg --fast --qr
+  Fast + local QR.
+
+vb send file.jpg --secure --qr
+  Secure + local QR (phone enters code on webpage).
+
+vb send file.jpg --fast --global-qr
+  Fast + global QR (download from anywhere via relay).
+
+vb send file.jpg --secure --global-qr
+  Secure + global QR (relay serves file, phone enters code).
+
+--- SEND (clipboard) ---
+
+vb send --clip --fast
+  Clipboard + Fast mode.
+
+vb send --clip --secure
+  Clipboard + Secure mode.
+
+vb send --clip --secure-blast
+  Clipboard + Blast mode.
+
+vb send --clip --fast --qr
+  Clipboard + Fast + local QR.
+
+vb send --clip --secure --qr
+  Clipboard + Secure + local QR.
+
+vb send --clip --fast --global-qr
+  Clipboard + Fast + global QR.
+
+vb send --clip --secure --global-qr
+  Clipboard + Secure + global QR.
+
+--- RECEIVE ---
+
+vb receive file.jpg
+  Fast mode receive (joins by filename).
+
+vb receive 4829
+  Secure mode receive (joins by 4-digit code).
+
+vb receive file.jpg X9P1
+  Blast mode receive (filename + alphanumeric code).
+
+vb receive --clip
+  Fast mode receive, filename from clipboard.
+
+--- FLAG ORDER (any order works) ---
+
+vb send --clip --fast
+vb send --fast --clip
+vb send --global-qr --fast --clip
+vb send --clip --fast --global-qr
+vb send --qr --clip --fast
+  All equivalent — flag order does not matter.
+
+========================================
