@@ -209,7 +209,7 @@ pub async fn handle_send(
         _ => None,
     };
 
-    let stats = pipeline::send_file(&mut client, &session_id, &resolved_file, encryption_key).await?;
+    let stats = pipeline::send_file(&mut client, &session_id, &resolved_file, encryption_key, relay).await?;
 
     let speed = format_speed(stats.filesize, stats.elapsed.as_secs_f64());
 

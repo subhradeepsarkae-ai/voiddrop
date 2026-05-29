@@ -55,7 +55,7 @@ pub async fn handle_receive(
                 .await?;
 
             let encryption_key = Some(derive_key(blast_code));
-            let stats = pipeline::receive_file(&mut client, &effective_id, &effective_id, encryption_key).await?;
+            let stats = pipeline::receive_file(&mut client, &effective_id, &effective_id, encryption_key, relay, effective_code.as_deref()).await?;
             let speed = format_speed(stats.filesize, stats.elapsed.as_secs_f64());
             print_summary("Secure-Blast".red(), &stats, &speed);
         }
@@ -71,7 +71,7 @@ pub async fn handle_receive(
                 .await?;
 
             let encryption_key = Some(derive_key(&effective_id));
-            let stats = pipeline::receive_file(&mut client, &effective_id, &effective_id, encryption_key).await?;
+            let stats = pipeline::receive_file(&mut client, &effective_id, &effective_id, encryption_key, relay, Some(&effective_id)).await?;
             let speed = format_speed(stats.filesize, stats.elapsed.as_secs_f64());
             print_summary("Secure".cyan(), &stats, &speed);
         }
@@ -86,7 +86,7 @@ pub async fn handle_receive(
                 })
                 .await?;
 
-            let stats = pipeline::receive_file(&mut client, &effective_id, &effective_id, None).await?;
+            let stats = pipeline::receive_file(&mut client, &effective_id, &effective_id, None, relay, None).await?;
             let speed = format_speed(stats.filesize, stats.elapsed.as_secs_f64());
             print_summary("Fast".green(), &stats, &speed);
         }

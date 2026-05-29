@@ -3,6 +3,7 @@ use crate::ui::progress::new_progress_bar;
 use crate::ui::qr::get_public_ip;
 use crate::util::helpers::format_size;
 use anyhow::Result;
+use base64::Engine;
 use std::path::Path;
 use std::time::Instant;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -25,6 +26,7 @@ pub async fn send_file(
     session_id: &str,
     filepath: &str,
     encryption_key: Option<[u8; 32]>,
+    relay: &str,
 ) -> Result<TransferStats> {
     let path = Path::new(filepath);
     let filesize = tokio::fs::metadata(filepath).await?.len();
@@ -55,8 +57,8 @@ pub async fn send_file(
             stream
         }
         _ => {
-            pb.finish_with_message("  ❌ Receiver did not connect".to_string());
-            return Err(anyhow::anyhow!("Receiver connection timed out"));
+            pb.finish_with_message("  ⚠ P2P blocked by NAT — uploading via relay...".to_string());
+            return relay_upload(client, session_id, filepath, filesize, filename, relay).await;
         }
     };
 
@@ -100,11 +102,71 @@ pub async fn send_file(
     Ok(TransferStats { filename, filesize, elapsed })
 }
 
+async fn relay_upload(
+    client: &mut SignallingClient,
+    session_id: &str,
+    filepath: &str,
+    filesize: u64,
+    filename: String,
+    _relay: &str,
+) -> Result<TransferStats> {
+
+    client
+        .send(&super::session::ClientMessage::UploadStart {
+            session_id: session_id.to_string(),
+            filesize,
+        })
+        .await?;
+
+    let mut file = tokio::fs::File::open(filepath).await?;
+    let mut buf = vec![0u8; 64 * 1024];
+    let mut written: u64 = 0;
+    let start = Instant::now();
+
+    loop {
+        let n = file.read(&mut buf).await?;
+        if n == 0 {
+            break;
+        }
+        let encoded = base64::engine::general_purpose::STANDARD.encode(&buf[..n]);
+        written += n as u64;
+        let is_last = written >= filesize;
+        client
+            .send(&super::session::ClientMessage::UploadChunk {
+                session_id: session_id.to_string(),
+                data: encoded,
+                is_last,
+            })
+            .await?;
+        if is_last {
+            break;
+        }
+    }
+
+    client
+        .recv_until(|m| matches!(m, ServerMessage::UploadComplete { .. }))
+        .await?;
+
+    println!("  🌍 File uploaded to relay — receiver is downloading...");
+
+    client
+        .send(&super::session::ClientMessage::Data {
+            session_id: session_id.to_string(),
+            payload: "done".into(),
+        })
+        .await?;
+
+    let elapsed = start.elapsed();
+    Ok(TransferStats { filename, filesize, elapsed })
+}
+
 pub async fn receive_file(
     client: &mut SignallingClient,
-    _session_id: &str,
+    session_id: &str,
     _identifier: &str,
     encryption_key: Option<[u8; 32]>,
+    relay: &str,
+    code: Option<&str>,
 ) -> Result<TransferStats> {
     let joined = client
         .recv_until(|m| matches!(m, ServerMessage::Joined { .. }))
@@ -131,8 +193,8 @@ pub async fn receive_file(
             stream
         }
         _ => {
-            pb.finish_with_message("  ❌ Could not connect to sender".to_string());
-            return Err(anyhow::anyhow!("Could not connect to sender"));
+            pb.finish_with_message("  ⚠ P2P blocked by NAT — downloading via relay...".to_string());
+            return relay_download(client, session_id, &filename, filesize, relay, code).await;
         }
     };
 
@@ -179,4 +241,89 @@ pub async fn receive_file(
     ));
 
     Ok(TransferStats { filename: outpath, filesize, elapsed })
+}
+
+async fn relay_download(
+    client: &mut SignallingClient,
+    session_id: &str,
+    filename: &str,
+    _filesize: u64,
+    relay: &str,
+    code: Option<&str>,
+) -> Result<TransferStats> {
+    let relay_host = relay.split(':').next().unwrap_or(relay);
+    let relay_port = relay.split(':').nth(1).unwrap_or("80");
+    let relay_addr = format!("{}:{}", relay_host, relay_port);
+    let code_param = code.map(|c| format!("?code={}", c)).unwrap_or_default();
+    let url_path = format!("/dl/{}{}", session_id, code_param);
+    let request = format!(
+        "GET {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n",
+        url_path, relay_host
+    );
+
+    let start = Instant::now();
+    let outpath = format!("received_{}", filename);
+
+    loop {
+        if start.elapsed() > Duration::from_secs(120) {
+            return Err(anyhow::anyhow!("Relay download timed out"));
+        }
+
+        let mut stream = match TcpStream::connect(&relay_addr).await {
+            Ok(s) => s,
+            Err(_) => {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                continue;
+            }
+        };
+
+        stream.write_all(request.as_bytes()).await?;
+
+        let mut header_buf = Vec::new();
+        let mut byte = [0u8; 1];
+        loop {
+            if stream.read(&mut byte).await? == 0 {
+                break;
+            }
+            header_buf.push(byte[0]);
+            if header_buf.ends_with(b"\r\n\r\n") {
+                break;
+            }
+        }
+
+        let header_str = String::from_utf8_lossy(&header_buf);
+
+        if header_str.contains("200 OK") {
+            let mut out = tokio::fs::File::create(&outpath).await?;
+            let mut body_buf = vec![0u8; 64 * 1024];
+            let mut total = 0u64;
+            loop {
+                let n = stream.read(&mut body_buf).await?;
+                if n == 0 {
+                    break;
+                }
+                out.write_all(&body_buf[..n]).await?;
+                total += n as u64;
+            }
+
+            let elapsed = start.elapsed();
+
+            client
+                .send(&super::session::ClientMessage::Data {
+                    session_id: session_id.to_string(),
+                    payload: "done".into(),
+                })
+                .await?;
+
+            return Ok(TransferStats { filename: outpath, filesize: total, elapsed });
+        } else if header_str.contains("404") {
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            continue;
+        } else {
+            return Err(anyhow::anyhow!(
+                "Relay download failed: {}",
+                header_str.lines().next().unwrap_or("unknown")
+            ));
+        }
+    }
 }
