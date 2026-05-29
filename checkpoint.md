@@ -241,6 +241,10 @@ iwr -useb https://raw.githubusercontent.com/subhradeepsarkae-ai/voiddrop/master/
 
 ---
 
+## Upcoming (v0.2.0)
+
+- [ ] **Worldwide QR** — Add HTTP endpoint to `voiddrop-server` (`/qr/<session-id>`). Sender streams file through relay, phone downloads over internet. File buffered in memory only, no disk storage. QR URL becomes `https://zephyr.proxy.rlwy.net/qr/<id>`. Works from anywhere.
+
 ## Do NOT add
 
 - accounts
