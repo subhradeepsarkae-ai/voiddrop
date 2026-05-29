@@ -4,7 +4,7 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 
@@ -127,14 +127,53 @@ async fn handle_http(
     writer: &mut tokio::io::WriteHalf<TcpStream>,
     sessions: Arc<Mutex<SessionManager>>,
 ) -> Result<()> {
+    let mut content_length: usize = 0;
+
     loop {
         let mut hdr = String::new();
         if reader.read_line(&mut hdr).await? == 0 { break; }
-        if hdr.trim().is_empty() { break; }
+        let trimmed = hdr.trim();
+        if trimmed.is_empty() { break; }
+        if let Some(val) = trimmed.strip_prefix("Content-Length:").or_else(|| trimmed.strip_prefix("content-length:")) {
+            content_length = val.trim().parse().unwrap_or(0);
+        }
     }
 
     let parts: Vec<&str> = first_line.split_whitespace().collect();
+    let method = parts.first().unwrap_or(&"");
     let path = parts.get(1).unwrap_or(&"/");
+
+    if *method == "POST" {
+        let session_id = path.strip_prefix("/upload/").unwrap_or("");
+        let mut sm = sessions.lock().await;
+        if !sm.upload_start(session_id) {
+            drop(sm);
+            let resp = make_http_header(404, "text/plain", 26);
+            writer.write_all(resp.as_bytes()).await?;
+            writer.write_all(b"Session not found for upload").await?;
+            return Ok(());
+        }
+        drop(sm);
+
+        let mut body = vec![0u8; content_length];
+        let mut read_total = 0;
+        while read_total < content_length {
+            let n = reader.read(&mut body[read_total..]).await?;
+            if n == 0 { break; }
+            read_total += n;
+        }
+        body.truncate(read_total);
+
+        let mut sm = sessions.lock().await;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(&body);
+        let _ = sm.upload_chunk(session_id, &encoded, true);
+
+        let resp = make_http_header(200, "text/plain", 2);
+        writer.write_all(resp.as_bytes()).await?;
+        writer.write_all(b"OK").await?;
+        return Ok(());
+    }
+
     let session_id = path.strip_prefix("/dl/").and_then(|s| s.split('?').next()).unwrap_or("");
     let query_code = path.split("?code=").nth(1).unwrap_or("");
 

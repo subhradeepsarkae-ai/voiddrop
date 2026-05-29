@@ -8,11 +8,8 @@ use crate::ui::qr::print_qr;
 use crate::util::clipboard;
 use crate::util::helpers::{copy_to_clipboard, format_size, format_speed, generate_blast_code, generate_code};
 use anyhow::Result;
-use base64::Engine;
 use colored::Colorize;
 use std::path::Path;
-use std::time::Instant;
-use tokio::io::AsyncReadExt;
 
 pub async fn handle_send(
     file: Option<String>,
@@ -114,47 +111,11 @@ pub async fn handle_send(
     if global_qr && mode != "blast" {
         let upload_spinner = new_spinner("  🌍 Uploading file to relay...");
 
-        client
-            .send(&crate::transfer::session::ClientMessage::UploadStart {
-                session_id: session_id.clone(),
-                filesize,
-            })
-            .await?;
-
-        let mut file = tokio::fs::File::open(&resolved_file).await?;
-        let mut buf = vec![0u8; 64 * 1024];
-        let mut written: u64 = 0;
-        let upload_start = Instant::now();
-
-        loop {
-            let n = file.read(&mut buf).await?;
-            if n == 0 {
-                break;
-            }
-            let encoded = base64::engine::general_purpose::STANDARD.encode(&buf[..n]);
-            written += n as u64;
-            let is_last = written >= filesize;
-            client
-                .send(&crate::transfer::session::ClientMessage::UploadChunk {
-                    session_id: session_id.clone(),
-                    data: encoded,
-                    is_last,
-                })
-                .await?;
-            if is_last {
-                break;
-            }
-        }
-
-        client
-            .recv_until(|m| matches!(m, crate::transfer::session::ServerMessage::UploadComplete { .. }))
-            .await?;
-
-        let upload_elapsed = upload_start.elapsed();
+        let stats = crate::transfer::pipeline::http_upload(relay, &session_id, &resolved_file).await?;
 
         upload_spinner.finish_with_message(format!(
             "  ✅ Uploaded to relay ({})",
-            format_size(filesize)
+            format_size(stats.filesize)
         ));
 
         let relay_host = relay.split(':').next().unwrap_or(relay);
@@ -168,16 +129,16 @@ pub async fn handle_send(
             println!("  {} Scan QR to download from anywhere", "📱".to_string());
         }
 
-        let speed = format_speed(filesize, upload_elapsed.as_secs_f64());
+        let speed = format_speed(stats.filesize, stats.elapsed.as_secs_f64());
 
         println!();
         println!("  {}", "┌────────────────────────────────┐".cyan());
         println!("  {} {:^30} {}", "│".cyan(), "Transfer Complete".green().bold(), "│".cyan());
         println!("  {}", "├────────────────────────────────┤".cyan());
         println!("  │  Mode:        {:<18} │", match mode { "secure" => "Secure QR".cyan(), _ => "Global QR".green() });
-        println!("  │  File:        {:<18} │", filename);
-        println!("  │  Size:        {:<18} │", format_size(filesize));
-        println!("  │  Time:        {:<18} │", format!("{:.1}s", upload_elapsed.as_secs_f64()));
+        println!("  │  File:        {:<18} │", stats.filename);
+        println!("  │  Size:        {:<18} │", format_size(stats.filesize));
+        println!("  │  Time:        {:<18} │", format!("{:.1}s", stats.elapsed.as_secs_f64()));
         println!("  │  Speed:       {:<18} │", speed);
         println!("  {}", "└────────────────────────────────┘".cyan());
         println!();

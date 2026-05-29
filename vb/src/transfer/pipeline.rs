@@ -3,7 +3,6 @@ use crate::ui::progress::new_progress_bar;
 use crate::ui::qr::get_public_ip;
 use crate::util::helpers::format_size;
 use anyhow::Result;
-use base64::Engine;
 use std::path::Path;
 use std::time::Instant;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -102,53 +101,54 @@ pub async fn send_file(
     Ok(TransferStats { filename, filesize, elapsed })
 }
 
-async fn relay_upload(
-    client: &mut SignallingClient,
-    session_id: &str,
-    filepath: &str,
-    filesize: u64,
-    filename: String,
-    _relay: &str,
-) -> Result<TransferStats> {
-
-    client
-        .send(&super::session::ClientMessage::UploadStart {
-            session_id: session_id.to_string(),
-            filesize,
-        })
-        .await?;
+pub async fn http_upload(relay: &str, session_id: &str, filepath: &str) -> Result<TransferStats> {
+    let path = std::path::Path::new(filepath);
+    let filename = path.file_name().unwrap().to_string_lossy().to_string();
+    let relay_host = relay.split(':').next().unwrap_or(relay);
+    let relay_port = relay.split(':').nth(1).unwrap_or("9876");
+    let relay_addr = format!("{}:{}", relay_host, relay_port);
 
     let mut file = tokio::fs::File::open(filepath).await?;
-    let mut buf = vec![0u8; 64 * 1024];
-    let mut written: u64 = 0;
-    let start = Instant::now();
+    let mut file_data = Vec::new();
+    tokio::io::AsyncReadExt::read_to_end(&mut file, &mut file_data).await?;
+    let filesize = file_data.len() as u64;
 
+    let request = format!(
+        "POST /upload/{} HTTP/1.1\r\nHost: {}\r\nContent-Length: {}\r\nContent-Type: application/octet-stream\r\nConnection: close\r\n\r\n",
+        session_id, relay_host, file_data.len()
+    );
+
+    let start = Instant::now();
+    let mut stream = TcpStream::connect(&relay_addr).await?;
+    stream.write_all(request.as_bytes()).await?;
+    stream.write_all(&file_data).await?;
+
+    let mut resp = Vec::new();
+    let mut byte = [0u8; 1];
     loop {
-        let n = file.read(&mut buf).await?;
-        if n == 0 {
-            break;
-        }
-        let encoded = base64::engine::general_purpose::STANDARD.encode(&buf[..n]);
-        written += n as u64;
-        let is_last = written >= filesize;
-        client
-            .send(&super::session::ClientMessage::UploadChunk {
-                session_id: session_id.to_string(),
-                data: encoded,
-                is_last,
-            })
-            .await?;
-        if is_last {
-            break;
-        }
+        if stream.read(&mut byte).await? == 0 { break; }
+        resp.push(byte[0]);
+        if resp.ends_with(b"\r\n\r\n") { break; }
     }
 
-    client
-        .recv_until(|m| matches!(m, ServerMessage::UploadComplete { .. }))
-        .await?;
+    let resp_str = String::from_utf8_lossy(&resp);
+    if !resp_str.contains("200 OK") {
+        anyhow::bail!("Relay upload failed: {}", resp_str.lines().next().unwrap_or("unknown"));
+    }
 
     let elapsed = start.elapsed();
     Ok(TransferStats { filename, filesize, elapsed })
+}
+
+async fn relay_upload(
+    _client: &mut SignallingClient,
+    session_id: &str,
+    filepath: &str,
+    _filesize: u64,
+    _filename: String,
+    relay: &str,
+) -> Result<TransferStats> {
+    http_upload(relay, session_id, filepath).await
 }
 
 pub async fn receive_file(

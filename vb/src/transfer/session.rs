@@ -72,8 +72,14 @@ impl SignallingClient {
     where
         P: Fn(&ServerMessage) -> bool,
     {
+        use tokio::time::timeout as timeout_fn;
+        use std::time::Duration;
         loop {
-            let msg = self.recv().await?;
+            let msg = timeout_fn(Duration::from_secs(60), self.recv()).await
+                .map_err(|_| anyhow::anyhow!("Timed out waiting for server response (60s)"))??;
+            if let ServerMessage::Error { message } = &msg {
+                anyhow::bail!("Server error: {}", message);
+            }
             if predicate(&msg) {
                 return Ok(msg);
             }
