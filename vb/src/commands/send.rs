@@ -118,8 +118,7 @@ pub async fn handle_send(
             format_size(stats.filesize)
         ));
 
-        let relay_host = relay.split(':').next().unwrap_or(relay);
-        let qr_url = format!("http://{}/dl/{}", relay_host, session_id);
+        let qr_url = format!("http://{}/dl/{}", relay, session_id);
         println!();
         print_qr(&qr_url);
 
