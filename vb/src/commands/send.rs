@@ -118,8 +118,7 @@ pub async fn handle_send(
             format_size(stats.filesize)
         ));
 
-        let http_base = crate::transfer::pipeline::http_base_from_relay(relay);
-        let qr_url = format!("{}/dl/{}", http_base, session_id);
+        let qr_url = format!("http://{}/dl/{}", relay, session_id);
         println!();
         print_qr(&qr_url);
 

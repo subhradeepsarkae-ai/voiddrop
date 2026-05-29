@@ -67,9 +67,9 @@ use clap::{Parser, Subcommand};
         "  Phone just needs a browser — no app required.\n\n",
         "━━━ FLAG: --relay ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n",
         "Use a custom signalling server instead of the default.\n\n",
-          "  --relay 127.0.0.1:9876        Local testing (self-hosted relay)\n",
-         "  --relay myrelay.com:9876      Your own server\n\n",
-          "DEFAULT: voiddrop.fly.dev:9876\n\n",
+        "  --relay 127.0.0.1:9876        Local testing (self-hosted relay)\n",
+        "  --relay myrelay.com:9876      Your own server\n\n",
+         "DEFAULT: zephyr.proxy.rlwy.net:12963\n\n",
          "━━━ FLAG: --clip ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n",
          "Send files directly from clipboard — no typing needed.\n\n",
          "SENDER:\n",
@@ -173,7 +173,7 @@ pub enum Commands {
 
         #[arg(
             long,
-            default_value = "voiddrop.fly.dev:9876",
+            default_value = "zephyr.proxy.rlwy.net:12963",
             help = "Signalling server address"
         )]
         relay: String,
@@ -206,7 +206,7 @@ pub enum Commands {
 
         #[arg(
             long,
-            default_value = "voiddrop.fly.dev:9876",
+            default_value = "zephyr.proxy.rlwy.net:12963",
             help = "Signalling server address"
         )]
         relay: String,
